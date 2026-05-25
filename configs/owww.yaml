@@ -1,0 +1,97 @@
+# Wake-word: "Hey Bubba"
+# openWakeWord embedding front-end + small Conv1D classifier.
+# The melspec + embedding ONNX files (from openWakeWord v0.5.1) are bundled
+# in models/owww/. See README for the deployment chain.
+
+wakeword:
+  phrase: "Hey Bubba"
+  variants:
+    - "Hey Bubba"
+    - "Hey, Bubba"
+    - "Hey Bubba."
+    - "hey bubba"
+    - "Hey Buba"
+    - "Hey Buhbah"
+    - "Hey Bubbah"
+
+audio:
+  sample_rate: 16000
+  window_seconds: 1.96         # OWW pipeline wants ~1.96 s for 15 embeddings
+  hop_seconds: 0.10
+
+# features.* unused on the OWW path (the front-end is the openWakeWord ONNX
+# chain). Kept here so other code that reads cfg.features doesn't error.
+features:
+  type: log_mel
+  n_fft: 512
+  win_length_ms: 25
+  hop_length_ms: 10
+  n_mels: 40
+  fmin: 20
+  fmax: 7600
+  log_offset: 1.0e-6
+  per_utt_normalize: true
+
+model:
+  name: owww                   # triggers the openWakeWord training path
+  num_classes: 2
+  n_emb: 15                    # number of 96-dim embeddings per window
+  emb_dim: 96
+  hidden: 128
+  dropout: 0.2
+  tau: 0                       # unused, kept so legacy code doesn't crash
+
+train:
+  seed: 1337
+  epochs: 40
+  batch_size: 256
+  optimizer: adamw
+  lr: 1.0e-3                   # smaller than BC-ResNet (smaller classifier)
+  weight_decay: 1.0e-4
+  warmup_epochs: 3
+  scheduler: cosine
+  amp: false                   # classifier is tiny — AMP overhead not worth it
+  ema_decay: 0.999
+  label_smoothing: 0.05
+
+  positive_ratio: 0.25
+  hard_negative_ratio: 0.25
+
+  loss: bce
+  focal_gamma: 2.0
+
+  augment:
+    # Audio-level augmentations apply BEFORE the OWW pipeline. The pretrained
+    # embedding already handles a lot of acoustic variation, so we lean
+    # on noise/RIR mixing more than fine prosody tricks.
+    pitch_shift_semitones: [0, 0]
+    time_stretch_pct: [0, 0]
+    gain_db: [-12, 6]
+    noise_snr_db: [-10, 25]
+    noise_prob: 0.9
+    rir_prob: 0.4
+    bandpass_prob: 0.30
+    codec_prob: 0.25
+    compress_prob: 0.40
+    shelf_eq_prob: 0.30
+    spec_time_mask: 25
+    spec_freq_mask: 7
+    spec_n_masks: 2
+
+data:
+  positives_dir: data/positives
+  negatives_dir: data/negatives
+  noise_dir: data/noise
+  rirs_dir: data/rirs
+  manifest_dir: data/manifests
+  val_fraction: 0.10
+  test_fraction: 0.10
+
+eval:
+  threshold_sweep: [0.05, 0.99, 0.01]
+  target_far_per_hour: 0.5
+
+export:
+  onnx_opset: 18
+  quantize_int8: true
+  representative_samples: 256

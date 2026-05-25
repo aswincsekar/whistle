@@ -1,0 +1,33 @@
+{
+  "pipeline": "owww",
+  "phrase": "Hey Bubba",
+  "sample_rate": 16000,
+  "window_samples": 31360,
+  "window_seconds": 1.96,
+  "hop_seconds": 0.1,
+  "chain": [
+    {
+      "step": "melspectrogram",
+      "file": "melspectrogram.onnx",
+      "input": "audio (1, samples) float32 PCM [-1,1]",
+      "output": "mel (1, 1, T, 32)",
+      "notes": "T ~= 196 for a 1.96s window"
+    },
+    {
+      "step": "embedding",
+      "file": "embedding_model.onnx",
+      "input": "(N, 76, 32, 1) \u2014 N sliding windows of 76 mel frames, stride 8",
+      "output": "(N, 1, 1, 96) \u2014 96-dim speech embeddings",
+      "notes": "For our window 15 embeddings"
+    },
+    {
+      "step": "classifier",
+      "file": "classifier.int8.onnx (or classifier.onnx)",
+      "input": "(1, 15, 96) \u2014 stacked embeddings",
+      "output": "(1, 2) logits \u2014 class 1 is the wake word"
+    }
+  ],
+  "n_embeddings_per_window": 15,
+  "embedding_dim": 96,
+  "classifier_params": 111362
+}

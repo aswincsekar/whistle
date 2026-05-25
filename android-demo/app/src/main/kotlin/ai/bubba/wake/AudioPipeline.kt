@@ -19,8 +19,8 @@ enum class AudioSourceMode(val androidSrc: Int, val label: String) {
 }
 
 class AudioPipeline(
-    private val detector: WakeWordDetector,
-    private val onResult: (WakeWordDetector.StepResult) -> Unit,
+    private val detector: WakeDetector,
+    private val onResult: (WakeStep) -> Unit,
     private val onSource: (String) -> Unit = {},
     private val sourceMode: AudioSourceMode = AudioSourceMode.PROCESSED,
 ) {

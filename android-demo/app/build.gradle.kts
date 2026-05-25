@@ -11,43 +11,32 @@ android {
         applicationId = "ai.bubba.wake"
         minSdk = 24
         targetSdk = 35
-        versionCode = 12
-        versionName = "0.12.0-multimodel-v1default"
+        versionCode = 14
+        versionName = "0.14.0-owww-trained"
         ndk {
-            // Universal build: bundles ORT native libs for all major ABIs so
-            // teammates on Chromebooks (x86_64), older 32-bit ARM phones
-            // (armeabi-v7a), or emulators all get a working install. ~4x the
-            // native-lib size of an arm64-only build (~70 MB APK vs 24 MB).
+            // Universal build for teammates on any device (Chromebook, older
+            // 32-bit ARM phones, emulators).
             abiFilters += listOf("arm64-v8a", "armeabi-v7a", "x86_64", "x86")
         }
     }
 
     buildTypes {
-        debug {
-            isMinifyEnabled = false
-        }
-        release {
-            isMinifyEnabled = false
-        }
+        debug { isMinifyEnabled = false }
+        release { isMinifyEnabled = false }
     }
 
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_17
         targetCompatibility = JavaVersion.VERSION_17
     }
-    kotlinOptions {
-        jvmTarget = "17"
-    }
+    kotlinOptions { jvmTarget = "17" }
 
-    // Don't compress the ONNX file; ORT wants to memory-map it.
     androidResources {
         noCompress += listOf("onnx", "bin")
     }
 
     sourceSets {
-        getByName("main") {
-            kotlin.srcDirs("src/main/kotlin")
-        }
+        getByName("main") { kotlin.srcDirs("src/main/kotlin") }
     }
 }
 

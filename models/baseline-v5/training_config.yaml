@@ -1,0 +1,43 @@
+augmentation_batch_size: 16
+augmentation_rounds: 1
+background_paths:
+- /mnt/whistle/owww-train/data/noise_16k
+background_paths_duplication_rate:
+- 1
+batch_n_per_class:
+  ACAV100M_sample: 1024
+  adversarial_negative: 50
+  positive: 50
+custom_negative_phrases:
+- hey buddy
+- hey bobby
+- hey bobbie
+- hey there
+- hey buster
+- hey baby
+- hey siri
+- hey google
+- hi bubba
+- okay bubba
+- yeah bubba
+- hey bro
+- hey number
+false_positive_validation_data_path: /mnt/whistle/owww-train/data/features/validation_set_features.npy
+feature_data_files:
+  ACAV100M_sample: /mnt/whistle/owww-train/data/features/openwakeword_features_ACAV100M_2000_hrs_16bit.npy
+layer_size: 32
+max_negative_weight: 1500
+model_name: hey_bubba_v0.1
+model_type: dnn
+n_samples: 5000
+n_samples_val: 1000
+output_dir: /mnt/whistle/owww-train/hey_bubba_model
+piper_sample_generator_path: /mnt/whistle/owww-train/piper-sample-generator
+rir_paths:
+- /mnt/whistle/owww-train/data/rirs_16k
+steps: 30000
+target_false_positives_per_hour: 0.2
+target_phrase:
+- hey bubba
+- heybubba
+tts_batch_size: 50

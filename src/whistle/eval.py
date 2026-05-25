@@ -64,23 +64,33 @@ def eval_checkpoint(cfg_path: str, ckpt_path: str, split: str = "test", use_ema:
     root = repo_root()
     device = _device()
 
+    is_owww = cfg.model.name == "owww"
     samples = load_manifest(root / cfg.data.manifest_dir / f"{split}.jsonl")
     ds = WakeWordDataset(samples, cfg.audio.sample_rate, cfg.audio.window_seconds,
                          augmenter=None, training=False, seed=0)
+    if is_owww:
+        from .data.dataset_owww import OWWEmbeddingDataset
+        ds = OWWEmbeddingDataset(ds, mode="mel")
     loader = DataLoader(ds, batch_size=cfg.train.batch_size, num_workers=2)
 
-    feat_cfg = FeatureConfig.from_cfg(cfg)
-    frontend = LogMelSpectrogram(feat_cfg).to(device).eval()
-    model = build_model(cfg).to(device).eval()
+    if is_owww:
+        from .models.owww_classifier import build_owww_model
+        from .frontends.openwww import OWWEmbeddingTorch
+        frontend = OWWEmbeddingTorch.get(device)
+        model = build_owww_model(cfg).to(device).eval()
+    else:
+        feat_cfg = FeatureConfig.from_cfg(cfg)
+        frontend = LogMelSpectrogram(feat_cfg).to(device).eval()
+        model = build_model(cfg).to(device).eval()
     _load_ckpt(model, ckpt_path, use_ema=use_ema)
 
     scores: list[float] = []
     labels: list[int] = []
     with torch.no_grad():
-        for audio, y in loader:
-            audio = audio.to(device, non_blocking=True)
-            mel = frontend(audio)
-            logits = _positive_logit(model(mel))
+        for x, y in loader:
+            x = x.to(device, non_blocking=True)
+            features = frontend(x) if frontend is not None else x
+            logits = _positive_logit(model(features))
             scores.extend(torch.sigmoid(logits).cpu().numpy().tolist())
             labels.extend(y.tolist())
     scores_arr = np.asarray(scores)

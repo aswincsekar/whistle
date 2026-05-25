@@ -95,15 +95,18 @@ def _positive_logit(logits: torch.Tensor) -> torch.Tensor:
 
 
 @torch.no_grad()
-def evaluate(model: nn.Module, frontend: nn.Module, loader: DataLoader,
+def evaluate(model: nn.Module, frontend: nn.Module | None, loader: DataLoader,
              device: torch.device) -> dict:
+    """frontend=None means the loader already yields model-ready features
+    (e.g. precomputed openWakeWord embeddings)."""
     model.eval()
     scores: list[float] = []
     labels: list[int] = []
-    for audio, y in loader:
-        audio = audio.to(device, non_blocking=True)
-        mel = frontend(audio)
-        logits = model(mel)
+    for x, y in loader:
+        x = x.to(device, non_blocking=True)
+        if frontend is not None:
+            x = frontend(x)
+        logits = model(x)
         s = torch.sigmoid(_positive_logit(logits)).detach().cpu().numpy()
         scores.extend(s.tolist())
         labels.extend(y.tolist())
@@ -136,13 +139,15 @@ def evaluate(model: nn.Module, frontend: nn.Module, loader: DataLoader,
 
 
 def mine_hard_negatives(
-    model: nn.Module, frontend: nn.Module, dataset: WakeWordDataset,
+    model: nn.Module, frontend: nn.Module | None, dataset,
     device: torch.device, top_k: int = 1024, batch_size: int = 128
 ) -> list[int]:
     """Score every negative in `dataset` and return indices with highest model
     probability — these become the next epoch's hard negatives."""
     model.eval()
-    neg_idx = [i for i, s in enumerate(dataset.samples) if s.label == 0]
+    # `dataset` is either WakeWordDataset (audio) or OWWEmbeddingDataset wrapping one.
+    inner = getattr(dataset, "audio_ds", dataset)
+    neg_idx = [i for i, s in enumerate(inner.samples) if s.label == 0]
     if not neg_idx:
         return []
     loader = DataLoader(
@@ -151,10 +156,11 @@ def mine_hard_negatives(
     )
     scores: list[float] = []
     with torch.no_grad():
-        for audio, _ in loader:
-            audio = audio.to(device, non_blocking=True)
-            mel = frontend(audio)
-            logits = model(mel)
+        for x, _ in loader:
+            x = x.to(device, non_blocking=True)
+            if frontend is not None:
+                x = frontend(x)
+            logits = model(x)
             scores.extend(torch.sigmoid(_positive_logit(logits)).cpu().numpy().tolist())
     order = np.argsort(scores)[::-1][:top_k]
     return [neg_idx[int(i)] for i in order]
@@ -177,7 +183,9 @@ def train(cfg_path: str, init_from: str | None = None,
     root = repo_root()
     _seed_all(cfg.train.seed)
     device = _device()
-    print(f"[whistle] device = {device}, model = {cfg.model.name}, tau = {cfg.model.tau}")
+    is_owww = cfg.model.name == "owww"
+    print(f"[whistle] device = {device}, model = {cfg.model.name}"
+          + (f", tau = {cfg.model.tau}" if not is_owww else ""))
     if init_from:
         print(f"[whistle] init_from = {init_from}  lr = {cfg.train.lr}  epochs = {cfg.train.epochs}")
 
@@ -192,7 +200,8 @@ def train(cfg_path: str, init_from: str | None = None,
     print(f"[whistle] noise samples = {len(noise_pool)}, RIRs = {len(rir_pool)}")
     augmenter = Augmenter(AugmentConfig.from_cfg(cfg), noise_pool, rir_pool, cfg.audio.sample_rate)
 
-    # Datasets
+    # Datasets — raw audio. The openWakeWord path wraps them with an
+    # embedding-producing wrapper after construction.
     train_ds = WakeWordDataset(
         train_samples, cfg.audio.sample_rate, cfg.audio.window_seconds,
         augmenter=augmenter, training=True, seed=cfg.train.seed,
@@ -201,6 +210,12 @@ def train(cfg_path: str, init_from: str | None = None,
         val_samples, cfg.audio.sample_rate, cfg.audio.window_seconds,
         augmenter=None, training=False, seed=0,
     )
+    if is_owww:
+        from .data.dataset_owww import OWWEmbeddingDataset
+        # mel mode: workers do melspec only, GPU does embedding+classifier.
+        # ~5x faster than running the embedding ONNX per sample on CPU.
+        train_ds = OWWEmbeddingDataset(train_ds, mode="mel")
+        val_ds = OWWEmbeddingDataset(val_ds, mode="mel")
 
     # Balanced sampler
     labels = [s.label for s in train_samples]
@@ -218,9 +233,17 @@ def train(cfg_path: str, init_from: str | None = None,
     val_loader = DataLoader(val_ds, batch_size=cfg.train.batch_size, num_workers=2)
 
     # Model + front-end (front-end is also a Module, lives on device)
-    feat_cfg = FeatureConfig.from_cfg(cfg)
-    frontend = LogMelSpectrogram(feat_cfg).to(device)
-    model = build_model(cfg).to(device)
+    if is_owww:
+        from .models.owww_classifier import build_owww_model
+        from .frontends.openwww import OWWEmbeddingTorch
+        # The embedding model is frozen — it takes mel features from the
+        # dataloader and produces (B, 15, 96) embeddings on-GPU.
+        frontend = OWWEmbeddingTorch.get(device)
+        model = build_owww_model(cfg).to(device)
+    else:
+        feat_cfg = FeatureConfig.from_cfg(cfg)
+        frontend = LogMelSpectrogram(feat_cfg).to(device)
+        model = build_model(cfg).to(device)
     n_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
     print(f"[whistle] params = {n_params:,}")
 
@@ -255,12 +278,12 @@ def train(cfg_path: str, init_from: str | None = None,
         model.train()
         t0 = time.time()
         ep_loss = 0.0; ep_n = 0
-        for step, (audio, y) in enumerate(train_loader):
-            audio = audio.to(device, non_blocking=True)
+        for step, (x_batch, y) in enumerate(train_loader):
+            x_batch = x_batch.to(device, non_blocking=True)
             y = y.to(device, non_blocking=True).float()
             with torch.amp.autocast(device_type=device.type, enabled=cfg.train.amp and device.type == "cuda"):
-                mel = frontend(audio)
-                logits = _positive_logit(model(mel))
+                x_model = frontend(x_batch) if frontend is not None else x_batch
+                logits = _positive_logit(model(x_model))
                 if cfg.train.loss == "focal":
                     loss = focal_bce(logits, y, gamma=cfg.train.focal_gamma,
                                      smoothing=cfg.train.label_smoothing)
@@ -275,7 +298,7 @@ def train(cfg_path: str, init_from: str | None = None,
             scaler.step(opt); scaler.update()
             ema.update(model)
 
-            ep_loss += loss.item() * audio.size(0); ep_n += audio.size(0)
+            ep_loss += loss.item() * x_batch.size(0); ep_n += x_batch.size(0)
 
         sched.step()
         train_loss = ep_loss / max(1, ep_n)

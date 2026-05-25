@@ -168,7 +168,8 @@ def export(cfg_path: str, ckpt_path: str, fmt: str, verify: bool):
     """Export the trained model to ONNX (and TFLite if requested)."""
     from .export import export as _export, verify_onnx
     meta = _export(cfg_path, ckpt_path, fmt=fmt)
-    if verify:
+    # OWW exports do their own parity check inside _export_owww.
+    if verify and meta.get("pipeline") != "owww":
         verify_onnx(cfg_path, ckpt_path, meta["outputs"]["onnx_audio"])
 
 
