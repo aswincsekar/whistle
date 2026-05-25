@@ -11,8 +11,8 @@ android {
         applicationId = "ai.bubba.wake"
         minSdk = 24
         targetSdk = 35
-        versionCode = 14
-        versionName = "0.14.0-owww-trained"
+        versionCode = 15
+        versionName = "0.15.0-streaming"
         ndk {
             // Universal build for teammates on any device (Chromebook, older
             // 32-bit ARM phones, emulators).

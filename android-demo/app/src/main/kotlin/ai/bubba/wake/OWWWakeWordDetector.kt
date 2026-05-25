@@ -7,24 +7,30 @@ import android.content.Context
 import java.nio.FloatBuffer
 
 /**
- * "Hey Bubba" wake-word detector built on openWakeWord's pretrained
- * speech embedding + a classifier trained via openWakeWord's native pipeline
- * (see models/baseline-v5/).
+ * Streaming "Hey Bubba" detector that mirrors openWakeWord's reference
+ * implementation. The trained classifier was trained on a rolling 16-frame
+ * embedding buffer, not a one-shot 2 s window — so we must reproduce that
+ * streaming pattern exactly or the classifier sees out-of-distribution input
+ * and produces ~0 for everything.
  *
- * Three ONNX models chained at runtime:
- *   1. melspectrogram.onnx    : (1, samples)        -> (1, 1, T, 32)
- *   2. embedding_model.onnx   : (16, 76, 32, 1)     -> (16, 1, 1, 96)
- *   3. hey_bubba_v0.1.onnx    : (1, 16, 96)         -> (1, 1) sigmoid
+ * Pipeline per 80 ms audio chunk:
+ *   1) Append to audio ring buffer.
+ *   2) Run melspectrogram.onnx on the audio ring -> mel frames.
+ *      Take only the *newest* 8 mel frames and push into the mel deque.
+ *   3) If we have 76+ mel frames buffered, run embedding_model.onnx on the
+ *      latest 76-frame window -> one 96-dim embedding. Push into the
+ *      embedding deque.
+ *   4) When the embedding deque has 16 entries, run the classifier on
+ *      (1, 16, 96) and emit a score.
  *
- * Window math: 16 sliding 76-frame mel windows with stride 8 → 16*8 + (76-8) = 196 mel
- * frames ≈ 1.96 s of audio. We use a 2.04 s ring buffer (32640 samples) so the
- * leading-edge mel frames have room to settle before being sampled.
+ * Steady-state ops per chunk: one mel call (cheap), one embedding call,
+ * one classifier call. Latency a few ms on a modern phone.
  */
 class OWWWakeWordDetector(
     context: Context,
     override val sampleRate: Int = 16_000,
-    override val windowSamples: Int = 32_640,        // 2.04 s @ 16 kHz
-    override val hopSamples: Int = 1_280,            // 80 ms (openWakeWord native hop)
+    override val windowSamples: Int = 32_640,      // 2.04 s audio history for mel context
+    override val hopSamples: Int = 1_280,          // 80 ms (openWakeWord native hop)
     override var threshold: Float = 0.5f,
     override var minDbfs: Float = -45f,
     override var cooldownMs: Long = 1_500L,
@@ -35,24 +41,35 @@ class OWWWakeWordDetector(
 ) : WakeDetector {
 
     private val env: OrtEnvironment = OrtEnvironment.getEnvironment()
-    private val mel: OrtSession
-    private val emb: OrtSession
-    private val cls: OrtSession
+    private val melSession: OrtSession
+    private val embSession: OrtSession
+    private val clsSession: OrtSession
     private val melInputName: String
     private val embInputName: String
     private val clsInputName: String
 
-    private val ring = FloatArray(windowSamples)
+    // Audio ring buffer (windowSamples).
+    private val audioRing = FloatArray(windowSamples)
+
+    // Mel frame deque: each entry is 32 floats. We cap at MEL_BUF_LEN; older drops out.
+    private val melBuf = ArrayDeque<FloatArray>(MEL_BUF_LEN)
+
+    // Embedding deque: each entry is 96 floats. Classifier needs 16.
+    private val embBuf = ArrayDeque<FloatArray>(N_EMBS)
+
     private val smoothQueue = ArrayDeque<Float>(smoothN)
     private var lastFireMs: Long = 0L
 
-    // Window constants matching the v5 training pipeline.
-    private val embWinFrames = 76
-    private val embStride = 8
-    private val nEmbeddings = 16
-    private val melTargetT = embWinFrames + (nEmbeddings - 1) * embStride   // 196
-    private val melBins = 32
-    private val embDim = 96
+    companion object {
+        // 76-frame window with stride 8 => need 76 frames buffered before first emb
+        private const val EMB_WIN = 76
+        private const val EMB_STRIDE = 8
+        private const val N_EMBS = 16
+        private const val MEL_BINS = 32
+        private const val EMB_DIM = 96
+        // Keep ~196 mel frames (covers the 16 embedding windows). A few extra is harmless.
+        private const val MEL_BUF_LEN = EMB_WIN + (N_EMBS - 1) * EMB_STRIDE  // = 196
+    }
 
     init {
         val opts = OrtSession.SessionOptions().apply {
@@ -61,102 +78,106 @@ class OWWWakeWordDetector(
         }
         fun load(asset: String): OrtSession =
             env.createSession(context.assets.open(asset).use { it.readBytes() }, opts)
-        mel = load(melAsset)
-        emb = load(embAsset)
-        cls = load(classifierAsset)
-        melInputName = mel.inputNames.iterator().next()
-        embInputName = emb.inputNames.iterator().next()
-        clsInputName = cls.inputNames.iterator().next()
+        melSession = load(melAsset)
+        embSession = load(embAsset)
+        clsSession = load(classifierAsset)
+        melInputName = melSession.inputNames.iterator().next()
+        embInputName = embSession.inputNames.iterator().next()
+        clsInputName = clsSession.inputNames.iterator().next()
     }
 
     override fun ingest(chunk: FloatArray, nowMs: Long): WakeStep {
         check(chunk.size == hopSamples) {
             "expected ${hopSamples} samples, got ${chunk.size}"
         }
-        System.arraycopy(ring, hopSamples, ring, 0, windowSamples - hopSamples)
-        System.arraycopy(chunk, 0, ring, windowSamples - hopSamples, hopSamples)
 
+        // 1) Slide audio ring + append new chunk
+        System.arraycopy(audioRing, hopSamples, audioRing, 0, windowSamples - hopSamples)
+        System.arraycopy(chunk, 0, audioRing, windowSamples - hopSamples, hopSamples)
+
+        // Energy gate on the most recent ~1 s of audio
         var sumSq = 0.0
-        for (v in ring) sumSq += v.toDouble() * v
-        val rms = kotlin.math.sqrt(sumSq / ring.size)
+        for (v in audioRing) sumSq += v.toDouble() * v
+        val rms = kotlin.math.sqrt(sumSq / audioRing.size)
         val dbfs = (20.0 * kotlin.math.log10(rms + 1e-9)).toFloat()
         if (dbfs < minDbfs) {
             pushSmooth(0f)
             return WakeStep(smoothed(), 0f, dbfs, fired = false, skipped = true)
         }
 
-        // 1. mel
-        val audioIn = OnnxTensor.createTensor(env, FloatBuffer.wrap(ring),
+        // 2) Mel for the full audio ring; take the LAST 8 frames as the new ones.
+        val audioIn = OnnxTensor.createTensor(env, FloatBuffer.wrap(audioRing),
                                               longArrayOf(1, windowSamples.toLong()))
-        val melArr: Array<Array<Array<FloatArray>>>
+        val newMelFrames: Array<FloatArray>
         try {
-            val out = mel.run(mapOf(melInputName to audioIn))
+            val out = melSession.run(mapOf(melInputName to audioIn))
             @Suppress("UNCHECKED_CAST")
-            melArr = out[0].value as Array<Array<Array<FloatArray>>>
+            val melArr = out[0].value as Array<Array<Array<FloatArray>>>  // (1, 1, T, 32)
+            val T = melArr[0][0].size
+            val take = minOf(8, T)
+            // copy last `take` rows
+            newMelFrames = Array(take) { melArr[0][0][T - take + it].copyOf() }
             out.close()
         } finally { audioIn.close() }
 
-        val rawT = melArr[0][0].size
-        val melBuf = FloatArray(melTargetT * melBins)
-        val copyT = minOf(rawT, melTargetT)
-        for (t in 0 until copyT) {
-            System.arraycopy(melArr[0][0][t], 0, melBuf, t * melBins, melBins)
+        for (f in newMelFrames) {
+            if (melBuf.size == MEL_BUF_LEN) melBuf.removeFirst()
+            melBuf.addLast(f)
         }
-        if (rawT < melTargetT) {
-            val lastRow = melArr[0][0][rawT - 1]
-            for (t in rawT until melTargetT) {
-                System.arraycopy(lastRow, 0, melBuf, t * melBins, melBins)
+
+        // 3) If we have 76+ mel frames, compute the NEW embedding from the latest 76.
+        if (melBuf.size >= EMB_WIN) {
+            val embInBuf = FloatArray(EMB_WIN * MEL_BINS)
+            val melList = melBuf.toList()
+            val start = melList.size - EMB_WIN
+            for (i in 0 until EMB_WIN) {
+                System.arraycopy(melList[start + i], 0, embInBuf, i * MEL_BINS, MEL_BINS)
             }
-        }
-
-        // 2. embedding batch over 16 sliding windows
-        val embInBuf = FloatArray(nEmbeddings * embWinFrames * melBins)
-        for (n in 0 until nEmbeddings) {
-            val startFrame = n * embStride
-            System.arraycopy(
-                melBuf, startFrame * melBins,
-                embInBuf, n * embWinFrames * melBins,
-                embWinFrames * melBins,
+            val embIn = OnnxTensor.createTensor(
+                env, FloatBuffer.wrap(embInBuf),
+                longArrayOf(1, EMB_WIN.toLong(), MEL_BINS.toLong(), 1L),
             )
-        }
-        val embIn = OnnxTensor.createTensor(
-            env, FloatBuffer.wrap(embInBuf),
-            longArrayOf(nEmbeddings.toLong(), embWinFrames.toLong(),
-                        melBins.toLong(), 1L),
-        )
-        val embArr: Array<Array<Array<FloatArray>>>
-        try {
-            val out = emb.run(mapOf(embInputName to embIn))
-            @Suppress("UNCHECKED_CAST")
-            embArr = out[0].value as Array<Array<Array<FloatArray>>>
-            out.close()
-        } finally { embIn.close() }
+            val newEmb: FloatArray
+            try {
+                val out = embSession.run(mapOf(embInputName to embIn))
+                @Suppress("UNCHECKED_CAST")
+                val embArr = out[0].value as Array<Array<Array<FloatArray>>>  // (1, 1, 1, 96)
+                newEmb = embArr[0][0][0].copyOf()
+                out.close()
+            } finally { embIn.close() }
 
-        val clsInBuf = FloatArray(nEmbeddings * embDim)
-        for (n in 0 until nEmbeddings) {
-            System.arraycopy(embArr[n][0][0], 0, clsInBuf, n * embDim, embDim)
+            if (embBuf.size == N_EMBS) embBuf.removeFirst()
+            embBuf.addLast(newEmb)
         }
 
-        // 3. classifier — outputs a single sigmoid score (already 0..1)
+        // 4) Classifier — only when we have a full embedding buffer
+        if (embBuf.size < N_EMBS) {
+            pushSmooth(0f)
+            return WakeStep(smoothed(), 0f, dbfs, fired = false, skipped = false)
+        }
+        val clsInBuf = FloatArray(N_EMBS * EMB_DIM)
+        var n = 0
+        for (e in embBuf) {
+            System.arraycopy(e, 0, clsInBuf, n * EMB_DIM, EMB_DIM)
+            n++
+        }
         val clsIn = OnnxTensor.createTensor(
             env, FloatBuffer.wrap(clsInBuf),
-            longArrayOf(1L, nEmbeddings.toLong(), embDim.toLong()),
+            longArrayOf(1L, N_EMBS.toLong(), EMB_DIM.toLong()),
         )
         val raw: Float = try {
-            val out = cls.run(mapOf(clsInputName to clsIn))
-            @Suppress("UNCHECKED_CAST")
-            val arr = out[0].value
-            // openWakeWord classifier may return either [[score]] or [score]; handle both
-            val s = when (arr) {
-                is Array<*> -> when (val a0 = arr[0]) {
-                    is FloatArray -> a0[0]
-                    is Array<*> -> ((a0 as Array<*>)[0] as FloatArray)[0]
-                    else -> throw IllegalStateException("unexpected classifier output shape")
+            val out = clsSession.run(mapOf(clsInputName to clsIn))
+            val value = out[0].value
+            val score = when (value) {
+                is Array<*> -> when (val row = value[0]) {
+                    is FloatArray -> row[0]
+                    is Array<*> -> ((row as Array<*>)[0] as FloatArray)[0]
+                    else -> 0f
                 }
-                else -> throw IllegalStateException("unexpected classifier output type")
+                else -> 0f
             }
             out.close()
-            s
+            score
         } finally { clsIn.close() }
 
         pushSmooth(raw)
@@ -167,9 +188,9 @@ class OWWWakeWordDetector(
     }
 
     override fun close() {
-        try { mel.close() } catch (_: Throwable) {}
-        try { emb.close() } catch (_: Throwable) {}
-        try { cls.close() } catch (_: Throwable) {}
+        try { melSession.close() } catch (_: Throwable) {}
+        try { embSession.close() } catch (_: Throwable) {}
+        try { clsSession.close() } catch (_: Throwable) {}
     }
 
     private fun pushSmooth(v: Float) {
