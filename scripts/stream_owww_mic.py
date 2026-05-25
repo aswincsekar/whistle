@@ -28,7 +28,7 @@ WINDOW_SAMPLES = 31_360       # 1.96 s
 HOP_SAMPLES = 1_600           # 100 ms
 EMB_WIN_FRAMES = 76           # mel frames per embedding window
 EMB_STRIDE = 8                # mel frames between consecutive embeddings
-N_EMBEDDINGS = 15
+N_EMBEDDINGS = 16
 MEL_TARGET_T = EMB_WIN_FRAMES + (N_EMBEDDINGS - 1) * EMB_STRIDE   # 196
 MEL_BINS = 32
 EMB_DIM = 96
@@ -90,26 +90,29 @@ def main() -> None:
         if db < args.min_dbfs:
             return 0.0, 0.0, db
 
-        # 1) mel
-        mel = mel_sess.run(None, {mel_in: window[None]})[0]  # (1, 1, T, 32)
+        # CRITICAL: openWakeWord's melspec expects audio in int16 magnitude
+        # range (float32 values in [-32768, 32767]), not [-1, 1].
+        scaled = (window * 32767.0).astype(np.float32)
+        mel = mel_sess.run(None, {mel_in: scaled[None]})[0]  # (1, 1, T, 32)
         mel = mel[0, 0]                                      # (T, 32)
+        # Post-transform to match Google TFHub speech_embedding training distribution.
+        mel = mel / 10.0 + 2.0
         if mel.shape[0] > MEL_TARGET_T:
             mel = mel[:MEL_TARGET_T]
         elif mel.shape[0] < MEL_TARGET_T:
             pad = MEL_TARGET_T - mel.shape[0]
             mel = np.concatenate([mel, np.repeat(mel[-1:], pad, axis=0)], axis=0)
 
-        # 2) 15 windows
         chunks = np.stack([
             mel[i * EMB_STRIDE : i * EMB_STRIDE + EMB_WIN_FRAMES] for i in range(N_EMBEDDINGS)
-        ])[..., None].astype(np.float32)                      # (15, 76, 32, 1)
-        emb = emb_sess.run(None, {emb_in: chunks})[0]         # (15, 1, 1, 96)
+        ])[..., None].astype(np.float32)                      # (N, 76, 32, 1)
+        emb = emb_sess.run(None, {emb_in: chunks})[0]         # (N, 1, 1, 96)
         emb = emb.reshape(1, N_EMBEDDINGS, EMB_DIM).astype(np.float32)
 
-        # 3) classifier
-        logits = cls_sess.run(None, {cls_in: emb})[0][0]
-        raw = 1.0 / (1.0 + np.exp(-(logits[1] - logits[0])))
-        return float(raw), float(raw), db
+        # The v5 classifier already outputs sigmoid (single scalar).
+        out = cls_sess.run(None, {cls_in: emb})[0]
+        raw = float(out.reshape(-1)[0])
+        return raw, raw, db
 
     last_print = 0.0
     with sd.InputStream(channels=1, samplerate=SR, blocksize=HOP_SAMPLES,
