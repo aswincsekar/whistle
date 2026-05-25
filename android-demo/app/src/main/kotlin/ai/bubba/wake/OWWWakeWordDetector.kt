@@ -106,7 +106,13 @@ class OWWWakeWordDetector(
         }
 
         // 2) Mel for the full audio ring; take the LAST 8 frames as the new ones.
-        val audioIn = OnnxTensor.createTensor(env, FloatBuffer.wrap(audioRing),
+        // CRITICAL: openWakeWord's melspectrogram.onnx expects audio in int16
+        // magnitude range (float32 values in [-32768, 32767]), NOT the normal
+        // [-1, 1] float PCM scale. AudioRecord ENCODING_PCM_FLOAT gives us
+        // [-1, 1], so we scale up before sending in.
+        val scaled = FloatArray(windowSamples)
+        for (i in 0 until windowSamples) scaled[i] = audioRing[i] * 32767f
+        val audioIn = OnnxTensor.createTensor(env, FloatBuffer.wrap(scaled),
                                               longArrayOf(1, windowSamples.toLong()))
         val newMelFrames: Array<FloatArray>
         try {
@@ -115,8 +121,17 @@ class OWWWakeWordDetector(
             val melArr = out[0].value as Array<Array<Array<FloatArray>>>  // (1, 1, T, 32)
             val T = melArr[0][0].size
             val take = minOf(8, T)
-            // copy last `take` rows
-            newMelFrames = Array(take) { melArr[0][0][T - take + it].copyOf() }
+            // Copy last `take` rows AND apply openWakeWord's mel post-transform:
+            //   mel_out = mel_out / 10 + 2
+            // This makes the ONNX melspec match the original TF speech_embedding
+            // training distribution. Without it the embedding model sees OOD
+            // input and the classifier produces ~0 for everything.
+            newMelFrames = Array(take) { row ->
+                val src = melArr[0][0][T - take + row]
+                val dst = FloatArray(MEL_BINS)
+                for (b in 0 until MEL_BINS) dst[b] = src[b] / 10f + 2f
+                dst
+            }
             out.close()
         } finally { audioIn.close() }
 
