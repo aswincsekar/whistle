@@ -1,0 +1,49 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+.pytest_cache/
+
+# Secrets & local config
+.env
+.env.local
+*.pem
+*.key
+
+# macOS
+.DS_Store
+
+# Editor / tools
+.vscode/
+.idea/
+.claude/
+
+# Personal recordings (the test probe + any mic captures)
+probe.wav
+probe.bin
+*.aiff
+
+# Training data and runs (large, regenerable - the pipeline rebuilds these).
+data/
+
+# Training outputs at repo ROOT only (the canonical baselines under models/ stay).
+/checkpoints/
+/runs/
+/exports/
+
+# Android build outputs
+android-demo/.gradle/
+android-demo/.idea/
+android-demo/build/
+android-demo/app/build/
+android-demo/local.properties
+android-demo/captures/
+
+# APKs — too large for Git, distributed via GitHub Releases
+*.apk
+# But keep the smaller model files inside models/baseline-*/exports/.
+
+# Models: keep ONNX + metadata + README, exclude PyTorch checkpoints + APKs
+models/**/checkpoints/last.pt
+models/**/whistle-demo-*.apk

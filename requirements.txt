@@ -1,0 +1,23 @@
+# Pinned for reproducibility. For full ML stack run:
+#   uv pip install -e .[tflite,tts,dev]
+# This file is a quick-start subset (no TFLite export deps).
+numpy>=1.26,<3
+scipy>=1.11
+pyyaml>=6.0
+tqdm>=4.66
+rich>=13.7
+click>=8.1
+soundfile>=0.12
+librosa>=0.10
+audiomentations>=0.36
+pyloudnorm>=0.1.1
+resampy>=0.4
+torch>=2.2
+torchaudio>=2.2
+scikit-learn>=1.4
+tensorboard>=2.16
+onnx>=1.16
+onnxruntime>=1.17
+onnxsim>=0.4.36
+onnxscript>=0.7
+sounddevice>=0.4.6

@@ -1,0 +1,37 @@
+{
+  "phrase": "Hey Bubba",
+  "sample_rate": 16000,
+  "window_seconds": 1.2,
+  "hop_seconds": 0.1,
+  "input_samples": 19200,
+  "features": {
+    "n_fft": 512,
+    "win_length": 400,
+    "hop_length": 160,
+    "n_mels": 40,
+    "fmin": 20,
+    "fmax": 7600,
+    "log_offset": 1e-06,
+    "per_utt_normalize": true
+  },
+  "model": {
+    "name": "bc_resnet",
+    "tau": 3,
+    "num_params": 39446
+  },
+  "outputs": {
+    "onnx_audio": "/mnt/whistle/repo/exports/wakeword_audio.onnx",
+    "onnx_audio_int8": "/mnt/whistle/repo/exports/wakeword_audio.int8.onnx",
+    "onnx_mel": "/mnt/whistle/repo/exports/wakeword_mel.onnx",
+    "onnx_mel_int8": "/mnt/whistle/repo/exports/wakeword_mel.int8.onnx",
+    "tflite_audio_fp32": "/mnt/whistle/repo/exports/wakeword_audio.fp32.tflite",
+    "tflite_audio_int8": "/mnt/whistle/repo/exports/wakeword_audio.int8.tflite",
+    "mel_filterbank": "/mnt/whistle/repo/exports/mel_filterbank.npy",
+    "metadata": "/mnt/whistle/repo/exports/metadata.json"
+  },
+  "expected_input": {
+    "wakeword_audio": "float32 PCM, mono, normalized to [-1, 1], length = input_samples",
+    "wakeword_mel": "float32 log-mel (B, n_mels, frames)"
+  },
+  "output_shape": "logits (B, num_classes)"
+}

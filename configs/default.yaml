@@ -1,0 +1,95 @@
+# Wake-word: "Hey Bubba"
+# All paths are relative to the repo root.
+
+wakeword:
+  phrase: "Hey Bubba"
+  variants:
+    # Pronunciation/spelling variants fed to TTS to widen positive coverage.
+    - "Hey Bubba"
+    - "Hey, Bubba"
+    - "Hey Bubba."
+    - "hey bubba"
+    - "Hey Buba"
+    - "Hey Buhbah"
+    - "Hey Bubbah"
+
+audio:
+  sample_rate: 16000
+  window_seconds: 1.2          # Receptive field for one classification.
+  hop_seconds: 0.10            # Streaming stride at inference time.
+
+features:
+  type: log_mel
+  n_fft: 512
+  win_length_ms: 25
+  hop_length_ms: 10
+  n_mels: 40
+  fmin: 20
+  fmax: 7600
+  log_offset: 1.0e-6
+  per_utt_normalize: true
+
+model:
+  name: bc_resnet
+  # BC-ResNet tau scales channel width. tau=1 gives ~10k params, tau=2 ~28k,
+  # tau=3 ~55k. tau=8 is the original full model (~315k).
+  tau: 2
+  num_classes: 2               # background vs "Hey Bubba"
+  dropout: 0.1
+
+train:
+  seed: 1337
+  epochs: 60
+  batch_size: 256
+  optimizer: adamw
+  lr: 3.0e-3
+  weight_decay: 1.0e-4
+  warmup_epochs: 3
+  scheduler: cosine
+  amp: true                    # mixed precision on CUDA/MPS
+  ema_decay: 0.999
+  label_smoothing: 0.05
+
+  # Class balance & hard-negative mining
+  positive_ratio: 0.25         # share of positives per batch
+  hard_negative_ratio: 0.25    # share of mined hard negatives per batch
+
+  # Loss
+  loss: bce                    # bce | focal
+  focal_gamma: 2.0
+
+  # Augmentation toggles (config-driven so we can ablate)
+  augment:
+    pitch_shift_semitones: [-2.5, 2.5]
+    time_stretch_pct: [-10, 10]
+    gain_db: [-12, 6]
+    noise_snr_db: [-10, 25]      # widened low end so the model trains on heavy noise too
+    noise_prob: 0.9
+    rir_prob: 0.4
+    bandpass_prob: 0.55          # phone mics often have narrower bandwidth - was 0.2
+    codec_prob: 0.40             # mu-law / opus-like distortion - was 0.15
+    compress_prob: 0.65          # NEW: AGC-style soft-knee compression (mimic Android VOICE_RECOGNITION)
+    shelf_eq_prob: 0.50          # NEW: random low/high shelf EQ (mic coloration)
+    spec_time_mask: 25
+    spec_freq_mask: 7
+    spec_n_masks: 2
+
+data:
+  positives_dir: data/positives
+  negatives_dir: data/negatives
+  noise_dir: data/noise
+  rirs_dir: data/rirs
+  manifest_dir: data/manifests
+
+  # Held-out split fractions (positives are split by *speaker id* if available).
+  val_fraction: 0.10
+  test_fraction: 0.10
+
+eval:
+  threshold_sweep: [0.05, 0.99, 0.01]  # start, stop, step
+  target_far_per_hour: 0.5             # report FRR at this operating point
+
+export:
+  onnx_opset: 18              # opset 18 supports Pad with dynamic axes (needed by torch>=2.5)
+  quantize_int8: true
+  representative_samples: 256

@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">Hey Bubba</string>
+    <string name="status_idle">Tap Start to listen</string>
+    <string name="status_listening">Listening for \"Hey Bubba\"…</string>
+    <string name="status_wake">[WAKE] heard \"Hey Bubba\"</string>
+    <string name="action_start">Start listening</string>
+    <string name="action_stop">Stop</string>
+    <string name="perm_denied">Microphone permission denied</string>
+</resources>

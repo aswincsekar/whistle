@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="utf-8"?>
+<androidx.constraintlayout.widget.ConstraintLayout
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:app="http://schemas.android.com/apk/res-auto"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#11121C"
+    android:padding="20dp">
+
+    <TextView
+        android:id="@+id/title"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Hey Bubba"
+        android:textColor="#FFFFFF"
+        android:textSize="26sp"
+        android:textStyle="bold"
+        android:gravity="center"
+        android:layout_marginTop="20dp"
+        app:layout_constraintTop_toTopOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- Model picker - switch between baseline-v1 / v2 / v3 at runtime. -->
+    <RadioGroup
+        android:id="@+id/modelGroup"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:gravity="center"
+        android:layout_marginTop="10dp"
+        android:layout_marginHorizontal="20dp"
+        app:layout_constraintTop_toBottomOf="@id/title"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <RadioButton
+            android:id="@+id/modelV1"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="v1"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:layout_marginEnd="18dp"
+            android:checked="true" />
+
+        <RadioButton
+            android:id="@+id/modelV2"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="v2 AGC"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:layout_marginEnd="18dp" />
+
+        <RadioButton
+            android:id="@+id/modelV3"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="v3 noise"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp" />
+    </RadioGroup>
+
+    <View
+        android:id="@+id/indicator"
+        android:layout_width="220dp"
+        android:layout_height="220dp"
+        android:background="@drawable/bg_indicator_idle"
+        android:layout_marginTop="8dp"
+        app:layout_constraintTop_toBottomOf="@id/modelGroup"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <TextView
+        android:id="@+id/fireCount"
+        android:layout_width="wrap_content"
+        android:layout_height="wrap_content"
+        android:text="0"
+        android:textColor="#FFFFFF"
+        android:textSize="68sp"
+        android:textStyle="bold"
+        android:fontFamily="monospace"
+        app:layout_constraintTop_toTopOf="@id/indicator"
+        app:layout_constraintBottom_toBottomOf="@id/indicator"
+        app:layout_constraintStart_toStartOf="@id/indicator"
+        app:layout_constraintEnd_toEndOf="@id/indicator" />
+
+    <TextView
+        android:id="@+id/probValue"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="p 0.00"
+        android:textColor="#FFFFFF"
+        android:textSize="14sp"
+        android:gravity="center"
+        android:fontFamily="monospace"
+        android:layout_marginTop="12dp"
+        app:layout_constraintTop_toBottomOf="@id/indicator"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- mic level: bar + dBFS text -->
+    <ProgressBar
+        android:id="@+id/micBar"
+        style="@android:style/Widget.ProgressBar.Horizontal"
+        android:layout_width="0dp"
+        android:layout_height="10dp"
+        android:max="1000"
+        android:progress="0"
+        android:progressTint="#2EC4B6"
+        android:layout_marginTop="10dp"
+        android:layout_marginHorizontal="24dp"
+        app:layout_constraintTop_toBottomOf="@id/probValue"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <TextView
+        android:id="@+id/micValue"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="mic -∞ dBFS"
+        android:textColor="#B5B6C9"
+        android:textSize="12sp"
+        android:gravity="center"
+        android:fontFamily="monospace"
+        android:layout_marginTop="2dp"
+        app:layout_constraintTop_toBottomOf="@id/micBar"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- threshold slider -->
+    <TextView
+        android:id="@+id/thrLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="threshold: 0.35"
+        android:textColor="#B5B6C9"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:layout_marginTop="14dp"
+        android:layout_marginStart="20dp"
+        app:layout_constraintTop_toBottomOf="@id/micValue"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <SeekBar
+        android:id="@+id/thrSeek"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:max="100"
+        android:progress="35"
+        android:layout_marginHorizontal="20dp"
+        app:layout_constraintTop_toBottomOf="@id/thrLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- energy gate slider -->
+    <TextView
+        android:id="@+id/dbLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="energy gate: -45 dBFS"
+        android:textColor="#B5B6C9"
+        android:textSize="12sp"
+        android:fontFamily="monospace"
+        android:layout_marginTop="6dp"
+        android:layout_marginStart="20dp"
+        app:layout_constraintTop_toBottomOf="@id/thrSeek"
+        app:layout_constraintStart_toStartOf="parent" />
+
+    <SeekBar
+        android:id="@+id/dbSeek"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:max="50"
+        android:progress="15"
+        android:layout_marginHorizontal="20dp"
+        app:layout_constraintTop_toBottomOf="@id/dbLabel"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <!-- audio source toggle -->
+    <RadioGroup
+        android:id="@+id/srcGroup"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:orientation="horizontal"
+        android:layout_marginTop="10dp"
+        android:layout_marginHorizontal="20dp"
+        android:gravity="center"
+        app:layout_constraintTop_toBottomOf="@id/dbSeek"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent">
+
+        <RadioButton
+            android:id="@+id/srcRaw"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Raw"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:layout_marginEnd="24dp" />
+
+        <RadioButton
+            android:id="@+id/srcProcessed"
+            android:layout_width="wrap_content"
+            android:layout_height="wrap_content"
+            android:text="Processed"
+            android:textColor="#FFFFFF"
+            android:textSize="13sp"
+            android:checked="true" />
+    </RadioGroup>
+
+    <TextView
+        android:id="@+id/srcLabel"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="source: -"
+        android:textColor="#7A7C8E"
+        android:textSize="11sp"
+        android:gravity="center"
+        android:fontFamily="monospace"
+        android:layout_marginTop="2dp"
+        app:layout_constraintTop_toBottomOf="@id/srcGroup"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <TextView
+        android:id="@+id/buildInfo"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text=""
+        android:textColor="#5A5C6E"
+        android:textSize="10sp"
+        android:gravity="center"
+        android:fontFamily="monospace"
+        android:layout_marginBottom="6dp"
+        app:layout_constraintBottom_toTopOf="@id/startBtn"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+    <Button
+        android:id="@+id/startBtn"
+        android:layout_width="0dp"
+        android:layout_height="wrap_content"
+        android:text="Start listening"
+        android:textSize="15sp"
+        android:layout_marginBottom="12dp"
+        app:layout_constraintBottom_toBottomOf="parent"
+        app:layout_constraintStart_toStartOf="parent"
+        app:layout_constraintEnd_toEndOf="parent" />
+
+</androidx.constraintlayout.widget.ConstraintLayout>

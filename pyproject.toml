@@ -1,0 +1,74 @@
+[project]
+name = "whistle"
+version = "0.1.0"
+description = "On-device 'Hey Bubba' wake-word detector — training, augmentation, evaluation, and ONNX/TFLite export."
+requires-python = ">=3.10,<3.13"
+readme = "README.md"
+
+dependencies = [
+  # Core
+  "numpy>=1.26,<3",
+  "scipy>=1.11",
+  "pyyaml>=6.0",
+  "tqdm>=4.66",
+  "rich>=13.7",
+  "click>=8.1",
+
+  # Audio
+  "soundfile>=0.12",
+  "librosa>=0.10",
+  "audiomentations>=0.36",
+  "pyloudnorm>=0.1.1",
+  "resampy>=0.4",
+
+  # ML
+  "torch>=2.2",
+  "torchaudio>=2.2",
+  "scikit-learn>=1.4",
+  "tensorboard>=2.16",
+
+  # Export
+  "onnx>=1.16",
+  "onnxruntime>=1.17",
+  "onnxsim>=0.4.36",
+  "onnxscript>=0.7",
+  "python-dotenv>=1.0",
+
+  # Live demo (optional, only for `whistle stream --mic`)
+  "sounddevice>=0.4.6; sys_platform != 'linux' or platform_machine == 'x86_64'",
+]
+
+[project.optional-dependencies]
+tflite = [
+  # TFLite export path. Heavy — install only when you need it.
+  "tensorflow>=2.16",
+  "onnx2tf>=1.22",
+  "onnx-graphsurgeon>=0.5",
+  "sng4onnx>=1.0.4",
+  "tflite-support>=0.4.4; sys_platform != 'darwin'",
+  "ai-edge-litert>=1.0.0; sys_platform == 'darwin'",
+]
+tts = [
+  # Local TTS engines for positive synthesis. The pipeline also supports macOS `say`
+  # and pre-recorded WAVs, so these are optional.
+  "piper-tts>=1.2.0",
+]
+dev = [
+  "pytest>=8.0",
+  "ruff>=0.4",
+]
+
+[project.scripts]
+whistle = "whistle.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+include = ["whistle*"]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"

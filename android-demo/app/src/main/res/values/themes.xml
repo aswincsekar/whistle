@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <style name="Theme.HeyBubba" parent="Theme.Material3.DayNight.NoActionBar">
+        <item name="colorPrimary">#5E60CE</item>
+        <item name="colorOnPrimary">#FFFFFF</item>
+        <item name="android:statusBarColor">#1A1B2E</item>
+        <item name="android:windowLightStatusBar">false</item>
+    </style>
+</resources>
